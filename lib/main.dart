@@ -118,7 +118,10 @@ class ArxivService {
 
     final XmlDocument document = XmlDocument.parse(response.body);
     final Iterable<XmlElement> entries = document.findAllElements('entry');
-    return entries.map(_parseEntry).where((Paper p) => p.id.isNotEmpty).toList();
+    return entries
+        .map(_parseEntry)
+        .where((Paper p) => p.id.isNotEmpty)
+        .toList();
   }
 
   Future<http.Response> _requestWithFallback(String queryString) async {
@@ -140,7 +143,9 @@ class ArxivService {
             await Future<void>.delayed(Duration(seconds: waitSeconds));
             continue;
           }
-          lastError = Exception('arXiv request failed (${response.statusCode}) for $uri');
+          lastError = Exception(
+            'arXiv request failed (${response.statusCode}) for $uri',
+          );
           break;
         }
       } catch (e) {
@@ -189,7 +194,9 @@ class ArxivService {
   }
 
   String _text(XmlElement node, String tag) {
-    return node.findElements(tag).isEmpty ? '' : node.findElements(tag).first.innerText;
+    return node.findElements(tag).isEmpty
+        ? ''
+        : node.findElements(tag).first.innerText;
   }
 
   String _textArxiv(XmlElement node, String localTag) {
@@ -208,8 +215,13 @@ class ArxivService {
   List<String>? _extractAffiliations(XmlElement entry, String summary) {
     final List<String> fromAuthor = entry
         .findElements('author')
-        .expand((XmlElement authorNode) => authorNode.children.whereType<XmlElement>())
-        .where((XmlElement e) => e.name.local.toLowerCase().contains('affiliation'))
+        .expand(
+          (XmlElement authorNode) =>
+              authorNode.children.whereType<XmlElement>(),
+        )
+        .where(
+          (XmlElement e) => e.name.local.toLowerCase().contains('affiliation'),
+        )
         .map((XmlElement e) => _normalize(e.innerText))
         .where((String v) => v.isNotEmpty)
         .toSet()
@@ -291,7 +303,10 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       final String? cachedDay = prefs.getString(_cacheKeyDate);
       final String? cachedPapers = prefs.getString(_cacheKeyPapers);
       final bool shouldUseCache =
-          !forceRefresh && cachedDay == today && cachedPapers != null && cachedPapers.isNotEmpty;
+          !forceRefresh &&
+          cachedDay == today &&
+          cachedPapers != null &&
+          cachedPapers.isNotEmpty;
 
       if (shouldUseCache) {
         final List<dynamic> raw = jsonDecode(cachedPapers) as List<dynamic>;
@@ -355,7 +370,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     if (!_hasMore || _isLoadingMore || _isLoading) {
       return;
     }
-    if (index < _papers.length - 1) {
+    if (index < _papers.length - 2) {
       return;
     }
 
@@ -374,16 +389,22 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         _hasMore = nextPage.length == _pageSize;
         _isLoadingMore = false;
       });
-    } catch (_) {
+    } catch (e) {
       setState(() {
         _isLoadingMore = false;
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load more papers: $e')),
+        );
+      }
     }
   }
 
   Future<void> _openArxiv(Paper paper) async {
     final Uri uri = Uri.parse(paper.url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
+        mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not open arXiv link.')),
       );
@@ -402,7 +423,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     return Scaffold(
       body: Column(
         children: <Widget>[
-          const SizedBox(height: 16),
+          SizedBox(height: MediaQuery.of(context).padding.top + 2),
           _buildSearchBar(),
           Expanded(child: _buildContent()),
         ],
@@ -412,27 +433,43 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 
   Widget _buildSearchBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       child: Row(
         children: <Widget>[
           Expanded(
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              decoration: const InputDecoration(
-                hintText: 'Search cs.CV papers, e.g. diffusion, segmentation',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                style: Theme.of(context).textTheme.bodyMedium,
+                decoration: InputDecoration(
+                  hintText: 'Search cs.CV papers',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 34),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 7,
+                    horizontal: 10,
+                  ),
+                ),
+                onSubmitted: (_) => _runSearch(),
               ),
-              onSubmitted: (_) => _runSearch(),
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton(
-            onPressed: _runSearch,
-            child: const Text('Search'),
+          SizedBox(
+            height: 38,
+            child: FilledButton(
+              onPressed: _runSearch,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              child: const Text('Search'),
+            ),
           ),
         ],
       ),
@@ -502,10 +539,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 }
 
 class _PaperCard extends StatelessWidget {
-  const _PaperCard({
-    required this.paper,
-    required this.onOpenLink,
-  });
+  const _PaperCard({required this.paper, required this.onOpenLink});
 
   final Paper paper;
   final VoidCallback onOpenLink;
@@ -513,11 +547,11 @@ class _PaperCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 12),
       child: Card(
         elevation: 2,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          padding: const EdgeInsets.fromLTRB(10, 14, 10, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -527,19 +561,23 @@ class _PaperCard extends StatelessWidget {
                   Expanded(
                     child: InkWell(
                       onTap: onOpenLink,
-                      child: Text(
+                      child: SelectableText(
                         paper.title,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: const Color(0xFF0B7285),
-                              decoration: TextDecoration.underline,
-                            ),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF0B7285),
+                        ),
                       ),
                     ),
                   ),
                   IconButton(
                     tooltip: 'Copy title',
                     icon: const Icon(Icons.copy, size: 18),
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
                     padding: EdgeInsets.zero,
                     onPressed: () async {
                       await Clipboard.setData(ClipboardData(text: paper.title));
@@ -552,29 +590,93 @@ class _PaperCard extends StatelessWidget {
                   ),
                 ],
               ),
-              if (paper.comments != null && paper.comments!.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              _InfoSection(
+                label: 'Author',
+                content: paper.authors.join(', '),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 8),
+              _AbstractSection(content: paper.abstractText),
+              if (paper.acceptanceStatus != null &&
+                  paper.acceptanceStatus!.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 6),
-                Text('Comments: ${paper.comments}'),
+                SelectableText('Acceptance: ${paper.acceptanceStatus}'),
               ],
               const SizedBox(height: 8),
-              Text(
-                'Authors: ${paper.authors.join(', ')}',
+              _InfoSection(
+                label: 'Comment',
+                content: (paper.comments == null || paper.comments!.isEmpty)
+                    ? 'No comments'
+                    : paper.comments!,
                 maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (paper.acceptanceStatus != null && paper.acceptanceStatus!.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 6),
-                Text('Acceptance: ${paper.acceptanceStatus}'),
-              ],
-              const SizedBox(height: 12),
-              Text(
-                paper.abstractText,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.55),
-                textAlign: TextAlign.justify,
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _InfoSection extends StatelessWidget {
+  const _InfoSection({
+    required this.label,
+    required this.content,
+    this.maxLines,
+  });
+
+  final String label;
+  final String content;
+  final int? maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8FA),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SelectableText.rich(
+        TextSpan(
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
+          children: <TextSpan>[
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF0B7285),
+              ),
+            ),
+            TextSpan(text: content),
+          ],
+        ),
+        maxLines: maxLines,
+      ),
+    );
+  }
+}
+
+class _AbstractSection extends StatelessWidget {
+  const _AbstractSection({required this.content});
+
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F8FA),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SelectableText(
+        content,
+        textAlign: TextAlign.justify,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.5),
       ),
     );
   }
