@@ -372,18 +372,9 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('CVPR Reader'),
-        actions: <Widget>[
-          IconButton(
-            onPressed: () => _loadOrRefreshPapers(forceRefresh: true),
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-          ),
-        ],
-      ),
       body: Column(
         children: <Widget>[
+          const SizedBox(height: 16),
           _buildSearchBar(),
           _buildSortBar(),
           Expanded(child: _buildContent()),
@@ -468,10 +459,6 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 
     return Column(
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Text('Paper ${_currentIndex + 1} / ${_papers.length}'),
-        ),
         Expanded(
           child: PageView.builder(
             controller: _pageController,
@@ -492,6 +479,10 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
               );
             },
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, 6, 0, 12),
+          child: Text('Paper ${_currentIndex + 1} / ${_papers.length}'),
         ),
       ],
     );
