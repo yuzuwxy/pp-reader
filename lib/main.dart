@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -90,7 +91,12 @@ class Paper {
 }
 
 class ArxivService {
-  static const String _baseUrl = 'http://export.arxiv.org/api/query';
+  static const String _httpsBaseUrl = 'https://export.arxiv.org/api/query';
+  static const String _httpBaseUrl = 'http://export.arxiv.org/api/query';
+  static const Map<String, String> _headers = <String, String>{
+    'User-Agent': 'ppread-demo1/1.0 (Flutter; cs.CV reader)',
+    'Accept': 'application/atom+xml',
+  };
 
   Future<List<Paper>> fetchCvprPapers({
     required String keyword,
@@ -100,18 +106,42 @@ class ArxivService {
     final String query = keyword.trim().isEmpty
         ? 'cat:cs.CV'
         : 'cat:cs.CV+AND+all:${Uri.encodeQueryComponent(keyword.trim())}';
-    final Uri uri = Uri.parse(
-      '$_baseUrl?search_query=$query&start=0&max_results=$maxResults&sortBy=${_mapSort(sortMode)}&sortOrder=descending',
-    );
-
-    final http.Response response = await http.get(uri);
-    if (response.statusCode != 200) {
-      throw Exception('arXiv request failed (${response.statusCode}).');
-    }
+    final String queryString =
+        '?search_query=$query&start=0&max_results=$maxResults&sortBy=${_mapSort(sortMode)}&sortOrder=descending';
+    final http.Response response = await _requestWithFallback(queryString);
 
     final XmlDocument document = XmlDocument.parse(response.body);
     final Iterable<XmlElement> entries = document.findAllElements('entry');
     return entries.map(_parseEntry).where((Paper p) => p.id.isNotEmpty).toList();
+  }
+
+  Future<http.Response> _requestWithFallback(String queryString) async {
+    final List<Uri> endpoints = <Uri>[
+      Uri.parse('$_httpsBaseUrl$queryString'),
+      Uri.parse('$_httpBaseUrl$queryString'),
+    ];
+    Object? lastError;
+
+    for (final Uri uri in endpoints) {
+      try {
+        for (int attempt = 0; attempt < 3; attempt++) {
+          final http.Response response = await http.get(uri, headers: _headers);
+          if (response.statusCode == 200) {
+            return response;
+          }
+          if (response.statusCode == 429 && attempt < 2) {
+            final int waitSeconds = pow(2, attempt + 1).toInt();
+            await Future<void>.delayed(Duration(seconds: waitSeconds));
+            continue;
+          }
+          lastError = Exception('arXiv request failed (${response.statusCode}) for $uri');
+          break;
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw Exception('Could not connect to arXiv: $lastError');
   }
 
   String _mapSort(SortMode mode) {
@@ -283,6 +313,21 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         _isLoading = false;
       });
     } catch (e) {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? cachedPapers = prefs.getString(_cacheKeyPapers);
+      if (cachedPapers != null && cachedPapers.isNotEmpty) {
+        final List<dynamic> raw = jsonDecode(cachedPapers) as List<dynamic>;
+        final List<Paper> cached = raw
+            .map((dynamic item) => Paper.fromJson(item as Map<String, dynamic>))
+            .toList();
+        setState(() {
+          _papers = cached;
+          _currentIndex = 0;
+          _error = 'Rate limited by arXiv (429). Showing cached papers.';
+          _isLoading = false;
+        });
+        return;
+      }
       setState(() {
         _error = e.toString();
         _isLoading = false;
