@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -39,6 +40,7 @@ class Paper {
     required this.url,
     required this.publishedDate,
     required this.updatedDate,
+    this.comments,
     this.affiliations,
     this.acceptanceStatus,
   });
@@ -50,6 +52,7 @@ class Paper {
   final String url;
   final DateTime? publishedDate;
   final DateTime? updatedDate;
+  final String? comments;
   final List<String>? affiliations;
   final String? acceptanceStatus;
 
@@ -62,6 +65,7 @@ class Paper {
       'url': url,
       'publishedDate': publishedDate?.toIso8601String(),
       'updatedDate': updatedDate?.toIso8601String(),
+      'comments': comments,
       'affiliations': affiliations,
       'acceptanceStatus': acceptanceStatus,
     };
@@ -82,6 +86,7 @@ class Paper {
       updatedDate: json['updatedDate'] == null
           ? null
           : DateTime.tryParse(json['updatedDate'] as String),
+      comments: json['comments'] as String?,
       affiliations: (json['affiliations'] as List<dynamic>?)
           ?.map((dynamic e) => e.toString())
           .toList(),
@@ -164,6 +169,7 @@ class ArxivService {
         .toList();
     final DateTime? published = DateTime.tryParse(_text(entry, 'published'));
     final DateTime? updated = DateTime.tryParse(_text(entry, 'updated'));
+    final String comments = _normalize(_textArxiv(entry, 'comment'));
     final List<String>? affiliations = _extractAffiliations(entry, summary);
     final String? acceptance = _extractAcceptance(summary);
 
@@ -175,6 +181,7 @@ class ArxivService {
       url: id,
       publishedDate: published,
       updatedDate: updated,
+      comments: comments.isEmpty ? null : comments,
       affiliations: affiliations,
       acceptanceStatus: acceptance,
     );
@@ -182,6 +189,15 @@ class ArxivService {
 
   String _text(XmlElement node, String tag) {
     return node.findElements(tag).isEmpty ? '' : node.findElements(tag).first.innerText;
+  }
+
+  String _textArxiv(XmlElement node, String localTag) {
+    for (final XmlElement child in node.descendants.whereType<XmlElement>()) {
+      if (child.name.local == localTag && child.name.prefix == 'arxiv') {
+        return child.innerText;
+      }
+    }
+    return '';
   }
 
   String _normalize(String value) {
@@ -239,17 +255,15 @@ class PaperReaderPage extends StatefulWidget {
 class _PaperReaderPageState extends State<PaperReaderPage> {
   static const String _cacheKeyPapers = 'cached_papers';
   static const String _cacheKeyDate = 'cache_day';
-  static const String _favoritesKey = 'favorite_ids';
 
   final ArxivService _service = ArxivService();
   final TextEditingController _searchController = TextEditingController();
   final PageController _pageController = PageController();
 
   List<Paper> _papers = <Paper>[];
-  Set<String> _favoriteIds = <String>{};
   bool _isLoading = true;
   String? _error;
-  SortMode _sortMode = SortMode.latest;
+  final SortMode _sortMode = SortMode.latest;
   int _currentIndex = 0;
 
   @override
@@ -259,16 +273,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   }
 
   Future<void> _initialize() async {
-    await _loadFavorites();
     await _loadOrRefreshPapers(forceRefresh: false);
-  }
-
-  Future<void> _loadFavorites() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final List<String> ids = prefs.getStringList(_favoritesKey) ?? <String>[];
-    setState(() {
-      _favoriteIds = ids.toSet();
-    });
   }
 
   Future<void> _loadOrRefreshPapers({required bool forceRefresh}) async {
@@ -339,20 +344,6 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     await _loadOrRefreshPapers(forceRefresh: true);
   }
 
-  Future<void> _toggleFavorite(Paper paper) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final Set<String> next = Set<String>.from(_favoriteIds);
-    if (next.contains(paper.id)) {
-      next.remove(paper.id);
-    } else {
-      next.add(paper.id);
-    }
-    await prefs.setStringList(_favoritesKey, next.toList());
-    setState(() {
-      _favoriteIds = next;
-    });
-  }
-
   Future<void> _openArxiv(Paper paper) async {
     final Uri uri = Uri.parse(paper.url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
@@ -376,7 +367,6 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         children: <Widget>[
           const SizedBox(height: 16),
           _buildSearchBar(),
-          _buildSortBar(),
           Expanded(child: _buildContent()),
         ],
       ),
@@ -397,6 +387,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
                 prefixIcon: Icon(Icons.search),
                 border: OutlineInputBorder(),
                 isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               ),
               onSubmitted: (_) => _runSearch(),
             ),
@@ -407,33 +398,6 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
             child: const Text('Search'),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSortBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: SegmentedButton<SortMode>(
-        segments: const <ButtonSegment<SortMode>>[
-          ButtonSegment<SortMode>(
-            value: SortMode.latest,
-            icon: Icon(Icons.schedule),
-            label: Text('Time'),
-          ),
-          ButtonSegment<SortMode>(
-            value: SortMode.relevance,
-            icon: Icon(Icons.tune),
-            label: Text('Relevance'),
-          ),
-        ],
-        selected: <SortMode>{_sortMode},
-        onSelectionChanged: (Set<SortMode> value) {
-          setState(() {
-            _sortMode = value.first;
-          });
-          _runSearch();
-        },
       ),
     );
   }
@@ -470,11 +434,8 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
             },
             itemBuilder: (BuildContext context, int index) {
               final Paper paper = _papers[index];
-              final bool isFavorite = _favoriteIds.contains(paper.id);
               return _PaperCard(
                 paper: paper,
-                isFavorite: isFavorite,
-                onToggleFavorite: () => _toggleFavorite(paper),
                 onOpenLink: () => _openArxiv(paper),
               );
             },
@@ -492,14 +453,10 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 class _PaperCard extends StatelessWidget {
   const _PaperCard({
     required this.paper,
-    required this.isFavorite,
-    required this.onToggleFavorite,
     required this.onOpenLink,
   });
 
   final Paper paper;
-  final bool isFavorite;
-  final VoidCallback onToggleFavorite;
   final VoidCallback onOpenLink;
 
   @override
@@ -513,24 +470,47 @@ class _PaperCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              InkWell(
-                onTap: onOpenLink,
-                child: Text(
-                  paper.title,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: const Color(0xFF0B7285),
-                        decoration: TextDecoration.underline,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: InkWell(
+                      onTap: onOpenLink,
+                      child: Text(
+                        paper.title,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: const Color(0xFF0B7285),
+                              decoration: TextDecoration.underline,
+                            ),
                       ),
-                ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy title',
+                    icon: const Icon(Icons.copy, size: 18),
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    padding: EdgeInsets.zero,
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: paper.title));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Title copied')),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text('Authors: ${paper.authors.join(', ')}'),
-              if (paper.affiliations != null && paper.affiliations!.isNotEmpty) ...<Widget>[
+              if (paper.comments != null && paper.comments!.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 6),
-                Text('Affiliations: ${paper.affiliations!.join(' | ')}'),
+                Text('Comments: ${paper.comments}'),
               ],
-              const SizedBox(height: 6),
-              Text('Published: ${_formatDate(paper.publishedDate)}'),
+              const SizedBox(height: 8),
+              Text(
+                'Authors: ${paper.authors.join(', ')}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
               if (paper.acceptanceStatus != null && paper.acceptanceStatus!.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 6),
                 Text('Acceptance: ${paper.acceptanceStatus}'),
@@ -539,36 +519,12 @@ class _PaperCard extends StatelessWidget {
               Text(
                 paper.abstractText,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.55),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: <Widget>[
-                  FilledButton.icon(
-                    onPressed: onToggleFavorite,
-                    icon: Icon(isFavorite ? Icons.favorite : Icons.favorite_border),
-                    label: Text(isFavorite ? 'Saved' : 'Save'),
-                  ),
-                  const SizedBox(width: 10),
-                  OutlinedButton.icon(
-                    onPressed: onOpenLink,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Open arXiv'),
-                  ),
-                ],
+                textAlign: TextAlign.justify,
               ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  static String _formatDate(DateTime? dt) {
-    if (dt == null) {
-      return 'Unknown';
-    }
-    final String month = dt.month.toString().padLeft(2, '0');
-    final String day = dt.day.toString().padLeft(2, '0');
-    return '${dt.year}-$month-$day';
   }
 }
