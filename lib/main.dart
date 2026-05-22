@@ -106,13 +106,14 @@ class ArxivService {
   Future<List<Paper>> fetchCvprPapers({
     required String keyword,
     required SortMode sortMode,
+    int start = 0,
     int maxResults = 30,
   }) async {
     final String query = keyword.trim().isEmpty
         ? 'cat:cs.CV'
         : 'cat:cs.CV+AND+all:${Uri.encodeQueryComponent(keyword.trim())}';
     final String queryString =
-        '?search_query=$query&start=0&max_results=$maxResults&sortBy=${_mapSort(sortMode)}&sortOrder=descending';
+        '?search_query=$query&start=$start&max_results=$maxResults&sortBy=${_mapSort(sortMode)}&sortOrder=descending';
     final http.Response response = await _requestWithFallback(queryString);
 
     final XmlDocument document = XmlDocument.parse(response.body);
@@ -262,9 +263,12 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 
   List<Paper> _papers = <Paper>[];
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
   String? _error;
   final SortMode _sortMode = SortMode.latest;
   int _currentIndex = 0;
+  static const int _pageSize = 30;
 
   @override
   void initState() {
@@ -305,6 +309,8 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       final List<Paper> fresh = await _service.fetchCvprPapers(
         keyword: _searchController.text,
         sortMode: _sortMode,
+        start: 0,
+        maxResults: _pageSize,
       );
       await prefs.setString(
         _cacheKeyPapers,
@@ -315,6 +321,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       setState(() {
         _papers = fresh;
         _currentIndex = 0;
+        _hasMore = fresh.length == _pageSize;
         _isLoading = false;
       });
     } catch (e) {
@@ -342,6 +349,36 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 
   Future<void> _runSearch() async {
     await _loadOrRefreshPapers(forceRefresh: true);
+  }
+
+  Future<void> _loadMoreIfNeeded(int index) async {
+    if (!_hasMore || _isLoadingMore || _isLoading) {
+      return;
+    }
+    if (index < _papers.length - 1) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+    try {
+      final List<Paper> nextPage = await _service.fetchCvprPapers(
+        keyword: _searchController.text,
+        sortMode: _sortMode,
+        start: _papers.length,
+        maxResults: _pageSize,
+      );
+      setState(() {
+        _papers = <Paper>[..._papers, ...nextPage];
+        _hasMore = nextPage.length == _pageSize;
+        _isLoadingMore = false;
+      });
+    } catch (_) {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
   }
 
   Future<void> _openArxiv(Paper paper) async {
@@ -431,6 +468,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
               setState(() {
                 _currentIndex = index;
               });
+              _loadMoreIfNeeded(index);
             },
             itemBuilder: (BuildContext context, int index) {
               final Paper paper = _papers[index];
@@ -443,7 +481,20 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(0, 6, 0, 12),
-          child: Text('Paper ${_currentIndex + 1} / ${_papers.length}'),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text('Paper ${_currentIndex + 1} / ${_papers.length}'),
+              if (_isLoadingMore) ...<Widget>[
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ],
+            ],
+          ),
         ),
       ],
     );
